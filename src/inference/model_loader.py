@@ -82,6 +82,10 @@ class ModelLoader:
         
         return int(prediction[0])
     
+    @property
+    def is_loaded(self) -> bool:
+        return self.model is not None
+
     def get_model_info(self) -> dict:
         if self.model is None:
             return {"status": "not_loaded"}
