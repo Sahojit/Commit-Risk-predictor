@@ -33,6 +33,9 @@ class ConfigLoader:
     def load_main_config(self) -> Dict[str, Any]:
         return self.load_yaml("config.yaml")
     
+    def load_model_config(self) -> Dict[str, Any]:
+        return self.load_yaml("model_config.yaml")
+
     def load_db_config(self) -> Dict[str, Any]:
         config = self.load_yaml("db_config.yaml")
         
