@@ -132,6 +132,10 @@ class CommitPredictor:
         
         return results
     
+    def get_risk_threshold(self, risk_level: str) -> float:
+        thresholds = {"HIGH": 0.7, "MEDIUM": 0.4, "LOW": 0.0}
+        return thresholds.get(risk_level.upper(), 0.0)
+
     def get_model_info(self) -> Dict[str, Any]:
         return self.model_loader.get_model_info()
 
