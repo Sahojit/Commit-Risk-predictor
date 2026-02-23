@@ -26,6 +26,10 @@ class ModelEvaluator:
         self.results = {}
         logger.info("ModelEvaluator initialized")
     
+    def reset(self):
+        self.results = {}
+        logger.info("ModelEvaluator results cleared")
+
     def evaluate_model(
         self,
         model,
