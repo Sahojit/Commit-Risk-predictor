@@ -62,6 +62,13 @@ class CommitFeatureExtractor:
         
         return complexity
     
+    def get_feature_names(self) -> List[str]:
+        return [
+            'lines_added', 'lines_deleted', 'files_changed',
+            'total_churn', 'churn_ratio', 'touches_core',
+            'touches_tests', 'complexity_score'
+        ]
+
     def get_feature_statistics(self, features_df: pd.DataFrame) -> dict:
         numeric_cols = [
             'lines_added', 'lines_deleted', 'total_churn',
