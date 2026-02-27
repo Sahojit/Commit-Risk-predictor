@@ -121,3 +121,20 @@ class TestPredictBatch:
         mock_predictor.model_loader.predict_proba.side_effect = Exception("model error")
         results = mock_predictor.predict_batch([base_commit()])
         assert "error" in results[0]
+
+
+class TestRiskThreshold:
+    def test_high_threshold(self, mock_predictor):
+        assert mock_predictor.get_risk_threshold("HIGH") == pytest.approx(0.7)
+
+    def test_medium_threshold(self, mock_predictor):
+        assert mock_predictor.get_risk_threshold("MEDIUM") == pytest.approx(0.4)
+
+    def test_low_threshold(self, mock_predictor):
+        assert mock_predictor.get_risk_threshold("LOW") == pytest.approx(0.0)
+
+    def test_unknown_level_defaults_to_zero(self, mock_predictor):
+        assert mock_predictor.get_risk_threshold("UNKNOWN") == pytest.approx(0.0)
+
+    def test_case_insensitive(self, mock_predictor):
+        assert mock_predictor.get_risk_threshold("high") == pytest.approx(0.7)
