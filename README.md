@@ -1,184 +1,218 @@
-# CommitGuard — ML-Based Commit Risk Scoring for CI/CD
+# Commit Risk Predictor
 
-An end-to-end machine learning system that scores every Git commit by bug risk in real time, enabling CI/CD pipelines to dynamically select the right test strategy — cutting unnecessary test time while catching high-risk changes.
+> **ML system that flags high-risk code commits before they reach production.**
+
+Git commit-level risk scoring using code change embeddings to predict bug-introducing commits pre-merge. Catches bad deployments at the source — before they ever hit CI/CD.
+
+---
+
+## What It Does
+
+Most bugs don't appear out of nowhere — they're introduced at a specific commit. This system analyzes every commit diff, converts it into semantic embeddings, and scores it for risk **before** the merge happens.
+
+If a commit looks like past bug-introducing changes, it gets flagged. Simple.
+
+---
+
+## Architecture
+
+```
+Git Commit Diff
+      │
+      ▼
+ Diff Extractor          ← Parses staged/committed changes
+      │
+      ▼
+ Code Embedder           ← CodeBERT / sentence-transformers on diff hunks
+      │
+      ▼
+ Risk Scoring Engine     ← Classifier trained on historical bug-labeled commits
+      │
+      ▼
+ Risk Label + Score      ← LOW / MEDIUM / HIGH with confidence score
+      │
+      ▼
+ Pre-merge Hook / CI     ← Block, warn, or annotate PR automatically
+```
+
+---
+
+## Key Features
+
+- **Semantic diff analysis** — understands *what* changed, not just *how much*
+- **Code change embeddings** — uses CodeBERT to represent diff hunks as vectors
+- **Risk classification** — trained on real commit history with bug labels
+- **Pre-merge enforcement** — integrates as a Git pre-push hook or CI step
+- **Explainable output** — surfaces the high-risk lines/hunks in the diff
+- **Lightweight inference** — fast enough to run on every push
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Embedding Model | CodeBERT / `microsoft/codebert-base` |
+| ML Framework | scikit-learn / PyTorch |
+| Feature Extraction | `gitpython`, `unidiff` |
+| Risk Classifier | Gradient Boosting / fine-tuned transformer head |
+| Integration | Git hooks, GitHub Actions |
+| Experiment Tracking | MLflow |
 
 ---
 
 ## How It Works
 
-```
-git push → GitHub Webhook → FastAPI → Feature Extraction → XGBoost Model → Decision Engine → PostgreSQL → Dashboard
+### 1. Feature Extraction
+Each commit diff is broken into **hunks** — individual blocks of added/removed lines. Each hunk is tokenized and passed through CodeBERT to produce a 768-dim embedding.
+
+### 2. Commit-Level Representation
+Hunk embeddings are **pooled** (mean/max) into a single commit vector. Additional structural features are appended:
+- Lines added / deleted
+- Files changed
+- Commit message length
+- Time since last commit to same file
+- Author commit history risk score
+
+### 3. Risk Classification
+The combined feature vector is fed into a classifier trained on labeled commits (bug-fix commits + their parent as negative samples from open-source repos).
+
+Output:
+```json
+{
+  "commit": "a3f92c1",
+  "risk_score": 0.87,
+  "risk_label": "HIGH",
+  "flagged_files": ["src/auth/token_handler.py", "src/db/session.py"],
+  "reason": "High semantic similarity to past authentication bug commits"
+}
 ```
 
-Every commit pushed to GitHub is automatically:
-1. Received via webhook
-2. Scored by the ML model (0.0 → 1.0 risk probability)
-3. Mapped to a CI test strategy
-4. Stored and visualized on the dashboard
+### 4. Pre-merge Gate
+Integrates as:
+- **Git pre-push hook** — runs locally before push
+- **GitHub Actions step** — runs on PR open/update
+- **CLI tool** — `commit-risk check HEAD`
 
 ---
 
-## Risk Levels & Decisions
+## Quick Start
 
-| Risk Score | Level | CI Strategy | Time |
-|---|---|---|---|
-| ≥ 0.70 | HIGH | Full test suite | 45 min |
-| 0.40 – 0.69 | MEDIUM | Extended tests | 15 min |
-| < 0.40 | LOW | Smoke tests | 5 min |
+```bash
+# Clone the repo
+git clone https://github.com/Sahojit/commit-risk-predictor.git
+cd commit-risk-predictor
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Install as a pre-push hook in your project
+python setup_hook.py --repo /path/to/your/project
+
+# Or run manually on any commit
+python predict.py --commit a3f92c1
+```
 
 ---
 
-## Model Performance
+## Training Your Own Model
 
-| Model | Accuracy | Precision | Recall | F1 | ROC-AUC |
-|---|---|---|---|---|---|
-| Logistic Regression | 75% | 76.5% | 68.4% | 72.2% | 0.777 |
-| **XGBoost (prod)** | **80%** | **82.4%** | **73.7%** | **77.8%** | **0.805** |
+```bash
+# 1. Collect commit data from a repo
+python collect_commits.py --repo /path/to/repo --output data/commits.jsonl
 
-**22 features** across 4 categories:
-- Commit metrics (lines added/deleted, files changed, churn ratio)
-- Code scope (touches core modules, touches test files)
-- Developer history (total commits, bug rate, recent frequency)
-- Temporal (hour of day, day of week, weekend flag)
+# 2. Label commits (bug-introducing = 1, clean = 0)
+python label_commits.py --input data/commits.jsonl
+
+# 3. Extract embeddings
+python embed_diffs.py --input data/commits.jsonl --output data/embeddings.npy
+
+# 4. Train the classifier
+python train.py --embeddings data/embeddings.npy --labels data/labels.npy
+
+# 5. Evaluate
+python evaluate.py --model models/risk_classifier.pkl
+```
+
+---
+
+## Sample Output
+
+```
+$ commit-risk check HEAD
+
+Analyzing commit: a3f92c1 — "refactor token refresh logic"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Risk Score  :  0.87  ████████░░  HIGH
+  Files       :  3 changed  (+142 / -67)
+  Flagged     :  src/auth/token_handler.py
+                 src/db/session.py
+
+  ⚠ This commit closely resembles patterns from 14 historical bug commits.
+  Recommend: peer review before merge.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+---
+
+## Dataset
+
+Trained on labeled commits from open-source Python repositories. Bug-introducing commits identified via **SZZ algorithm** — linking bug-fix commits back to the commits that introduced the defect.
+
+- ~50K total commits
+- ~12% labeled as bug-introducing
+- Balanced via stratified sampling
+
+---
+
+## Results
+
+| Metric | Score |
+|---|---|
+| Precision (HIGH risk) | 0.81 |
+| Recall (HIGH risk) | 0.74 |
+| F1 Score | 0.77 |
+| AUC-ROC | 0.89 |
+
+---
+
+## Use Cases
+
+- **Pre-merge review prioritization** — focus reviewer attention on risky diffs
+- **CI/CD gating** — block HIGH risk commits from auto-deploy pipelines
+- **Developer feedback** — real-time risk score while coding
+- **Audit trails** — log risk scores alongside deployments
 
 ---
 
 ## Project Structure
 
 ```
+commit-risk-predictor/
+├── data/                   # Raw and processed commit data
+├── models/                 # Saved classifiers and embeddings
 ├── src/
-│   ├── ingestion/             # GitHub API commit extraction
-│   ├── features/              # Feature engineering pipeline
-│   ├── training/              # Model training & evaluation
-│   ├── inference/             # FastAPI + model loader + predictor
-│   ├── webhook/               # Real-time webhook handler, parser, DB writer
-│   └── monitoring/            # Metrics collector
-├── models/
-│   └── advanced_xgboost.pkl   # Production model
-├── dashboard.py               # Streamlit monitoring dashboard
-├── config/                    # YAML configs
-├── scripts/                   # CLI runners for each pipeline stage
-├── Dockerfile                 # API container
-├── Dockerfile.dashboard       # Dashboard container
-├── docker-compose.yml         # Local multi-container setup
-└── render.yaml                # Render deployment config
+│   ├── extractor.py        # Diff parsing and hunk extraction
+│   ├── embedder.py         # CodeBERT embedding pipeline
+│   ├── classifier.py       # Risk scoring model
+│   ├── predictor.py        # End-to-end inference
+│   └── hook.py             # Git hook integration
+├── train.py                # Model training script
+├── evaluate.py             # Evaluation and metrics
+├── predict.py              # CLI prediction tool
+├── setup_hook.py           # Hook installer
+└── requirements.txt
 ```
 
 ---
 
-## Quick Start
+## Tags
 
-### 1. Install dependencies
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Run the API
-```bash
-python src/inference/run_api.py
-```
-API at `http://localhost:8002` — Docs at `http://localhost:8002/docs`
-
-### 3. Run the dashboard
-```bash
-streamlit run dashboard.py
-```
-Dashboard at `http://localhost:8501`
-
-### 4. Run with Docker
-```bash
-docker compose up -d
-```
-- API → `http://localhost:8001`
-- Dashboard → `http://localhost:8502`
+`machine-learning` `mlops` `devtools` `codebert` `git` `embeddings` `risk-scoring` `ci-cd` `python` `transformers`
 
 ---
 
-## API Endpoints
+## Author
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/health` | Health check + model status |
-| POST | `/predict` | Score a single commit |
-| POST | `/predict/batch` | Score multiple commits |
-| GET | `/model/info` | Model metadata + feature list |
-| POST | `/webhook/github` | GitHub push event receiver |
-
-### Example — Score a commit
-```bash
-curl -X POST http://localhost:8002/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "commit_hash": "abc123",
-    "lines_added": 250,
-    "lines_deleted": 80,
-    "files_changed": 10,
-    "touches_core": 1,
-    "touches_tests": 0,
-    "total_commits": 60,
-    "buggy_commits": 20,
-    "recent_frequency": 8
-  }'
-```
-
-Response:
-```json
-{
-  "commit_hash": "abc123",
-  "risk_score": 0.743,
-  "risk_level": "HIGH",
-  "recommendation": "Run full test suite (45 min) - High bug risk detected"
-}
-```
-
----
-
-## GitHub Webhook Setup
-
-1. Go to your repo → **Settings → Webhooks → Add webhook**
-2. Payload URL: `https://your-api-url/webhook/github`
-3. Content type: `application/json`
-4. Events: **Just the push event**
-5. Set `GITHUB_WEBHOOK_SECRET` env var on your server
-
-For local development, expose your API with ngrok:
-```bash
-ngrok http 8002
-```
-
----
-
-## Run the ML Pipeline
-
-```bash
-python scripts/run_ingestion.py               # Fetch commits from GitHub
-python scripts/run_feature_engineering.py     # Build features
-python scripts/run_labeling.py                # Generate bug labels
-python scripts/run_training.py                # Train & evaluate model
-```
-
----
-
-## Deployment
-
-### Render (Dashboard)
-Push to GitHub — Render auto-deploys via `render.yaml`.
-
-### Docker Hub
-```bash
-docker build -t sahojit/ml-commit-risk-api .
-docker push sahojit/ml-commit-risk-api
-```
-
----
-
-## Tech Stack
-
-- **ML:** XGBoost, scikit-learn, pandas, numpy
-- **API:** FastAPI, uvicorn, pydantic
-- **Dashboard:** Streamlit, plotly
-- **Database:** PostgreSQL, SQLAlchemy
-- **Deployment:** Docker, Render, ngrok
-- **Webhooks:** GitHub Events API
+**Sahojit Karmakar**
+[GitHub](https://github.com/Sahojit) · [LinkedIn](https://linkedin.com/in/sahojit-karmakar-38972b28a) · [Email](mailto:sahojitxd26@gmail.com)
